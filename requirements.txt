@@ -1,6 +1,7 @@
-streamlit==1.41.0
+streamlit==1.41.1
 opencv-python-headless
 roboflow
 numpy
 Pillow
 requests
+protobuf
