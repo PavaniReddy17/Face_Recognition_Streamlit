@@ -11,7 +11,6 @@ import os
 import cv2
 import numpy as np
 from roboflow import Roboflow
-import requests
 
 # ---------------------------
 # Page Config
@@ -40,7 +39,6 @@ html, body, [class*="st-"], [class*="css-"] {
     --background-color: #0E1117;
     --secondary-background-color: #1A1E29;
     --text-color: #FAFAFA;
-    --secondary-text-color: #ADB5BD;
 }
 
 [data-testid="stAppViewContainer"] {
@@ -48,42 +46,12 @@ html, body, [class*="st-"], [class*="css-"] {
     color: var(--text-color);
 }
 
-header {visibility: hidden;}
-footer {visibility: hidden;}
-#MainMenu {visibility: hidden;}
-
 h1 {
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     font-weight: 700;
-    font-size: 2.8rem;
-    padding-bottom: 0.5rem;
-}
-
-h3 {
-    color: var(--text-color);
-    font-weight: 600;
-}
-
-h5 {
-    color: var(--primary-color);
-    font-weight: 600;
-    margin-bottom: 0.5rem;
-}
-
-[data-testid="column"] {
-    background-color: var(--secondary-background-color);
-    border-radius: 12px;
-    padding: 1.5rem;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-    border: 1px solid #2C334A;
-    transition: all 0.3s ease-in-out;
-}
-
-[data-testid="column"]:hover {
-    box-shadow: 0 8px 24px rgba(102, 126, 234, 0.2);
-    border-color: #667eea;
+    font-size: 2.5rem;
 }
 
 [data-testid="stButton"] button {
@@ -93,67 +61,13 @@ h5 {
     border-radius: 8px;
     padding: 0.75rem 1.5rem;
     font-weight: 600;
-    font-size: 1.1rem;
     width: 100%;
     transition: all 0.3s ease;
 }
 
 [data-testid="stButton"] button:hover {
-    background: linear-gradient(135deg, #764ba2 0%, #667eea 100%);
     box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
     transform: translateY(-2px);
-}
-
-[data-testid="stDownloadButton"] button {
-    background-color: #2C334A;
-    color: var(--text-color);
-    border: 2px solid var(--primary-color);
-    border-radius: 8px;
-    padding: 0.75rem 1.5rem;
-    font-weight: 600;
-    transition: all 0.3s ease;
-}
-
-[data-testid="stDownloadButton"] button:hover {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    color: #FFFFFF;
-    transform: translateY(-2px);
-}
-
-[data-testid="stMetric"] {
-    background-color: #2C334A;
-    border-radius: 8px;
-    padding: 1rem;
-    border-left: 5px solid var(--primary-color);
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
-}
-
-[data-testid="stMetricValue"] {
-    color: var(--primary-color);
-    font-size: 2rem;
-    font-weight: 700;
-}
-
-[data-testid="stFileUploader"] {
-    background-color: #2C334A;
-    border: 2px dashed #667eea;
-    border-radius: 8px;
-    padding: 1.5rem;
-}
-
-video {
-    border-radius: 8px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
-    width: 100%;
-}
-
-.stProgress > div > div > div > div {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-}
-
-hr {
-    border-top: 2px solid #2C334A;
-    margin: 2rem 0;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -163,11 +77,8 @@ hr {
 # ---------------------------
 @st.cache_resource
 def init_roboflow():
-    """Initialize Roboflow model with HARDCODED keys for easy deployment"""
+    """Initialize Roboflow model"""
     try:
-        # ---------------------------------------------------------
-        # HARDCODED API KEYS (No secrets.toml required)
-        # ---------------------------------------------------------
         api_key = "lYQhNaqU50FdyzkR0Gq5"
         workspace = "project-nhn9q"
         project = "face-detection-w9fbh"
@@ -177,7 +88,6 @@ def init_roboflow():
         rf = Roboflow(api_key=api_key)
         proj = rf.workspace(workspace).project(project)
         model = proj.version(version).model
-        
         return model, workspace, person_name
     except Exception as e:
         st.error(f"❌ Failed to initialize Roboflow: {str(e)}")
@@ -193,25 +103,28 @@ class FaceDetectionProcessor:
         self.confidence_threshold = confidence_threshold
     
     def process_video(self, input_path, output_path, progress_callback=None):
-        """Process video and detect faces"""
         cap = cv2.VideoCapture(str(input_path))
         if not cap.isOpened():
-            raise RuntimeError("Failed to open video")
+            raise RuntimeError(f"Could not open input video: {input_path}")
         
         fps = int(cap.get(cv2.CAP_PROP_FPS) or 30)
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
         
-        # NOTE: 'mp4v' is used for compatibility. 
-        # If video doesn't play in browser, try downloading it.
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v') 
-        out = cv2.VideoWriter(str(output_path), fourcc, fps, (width, height))
+        # Try AVC1 (H.264) first for better browser support, fallback to mp4v
+        try:
+            fourcc = cv2.VideoWriter_fourcc(*'avc1')
+            out = cv2.VideoWriter(str(output_path), fourcc, fps, (width, height))
+            if not out.isOpened():
+                raise Exception("avc1 failed")
+        except:
+            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+            out = cv2.VideoWriter(str(output_path), fourcc, fps, (width, height))
         
         if not out.isOpened():
-            raise RuntimeError("Failed to create output video")
+            raise RuntimeError("Failed to create output video writer")
         
-        # Statistics
         frame_count = 0
         detection_count = 0
         total_confidence = 0
@@ -223,92 +136,64 @@ class FaceDetectionProcessor:
                 break
             
             frame_count += 1
-            
-            # Update progress
             if progress_callback and total_frames > 0:
                 progress_callback(frame_count / total_frames)
             
-            # ---------------------------------------------------------
-            # FIX: Create temp file and CLOSE it immediately to release 
-            # the Windows file lock.
-            # ---------------------------------------------------------
+            # Save current frame to temp file for Roboflow
+            # Close immediately to avoid Windows permission errors
             temp_frame = tempfile.NamedTemporaryFile(delete=False, suffix='.jpg')
-            temp_frame.close() # <--- THIS LINE FIXES THE PERMISSION ERROR
+            temp_frame.close() 
             
             cv2.imwrite(temp_frame.name, frame)
             
             try:
-                # Get predictions from Roboflow
+                # Predict
                 predictions = self.model.predict(
                     temp_frame.name,
                     confidence=int(self.confidence_threshold * 100)
                 ).json()
                 
-                # Draw detections
+                # Draw
                 for pred in predictions['predictions']:
-                    x_center = pred['x']
-                    y_center = pred['y']
-                    w = pred['width']
-                    h = pred['height']
-                    confidence = pred['confidence']
+                    x, y, w, h = pred['x'], pred['y'], pred['width'], pred['height']
+                    conf = pred['confidence']
                     
-                    # Calculate box coordinates
-                    x1 = int(x_center - w / 2)
-                    y1 = int(y_center - h / 2)
-                    x2 = int(x_center + w / 2)
-                    y2 = int(y_center + h / 2)
+                    x1 = int(x - w / 2)
+                    y1 = int(y - h / 2)
+                    x2 = int(x + w / 2)
+                    y2 = int(y + h / 2)
                     
-                    # Draw rectangle (green)
-                    color = (0, 255, 0)
-                    cv2.rectangle(frame, (x1, y1), (x2, y2), color, 3)
+                    # Draw Box
+                    cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 3)
                     
-                    # Draw label with background
-                    label = f"{self.person_name} {confidence*100:.1f}%"
-                    label_size, _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2)
-                    label_w, label_h = label_size
+                    # Draw Label
+                    label = f"{self.person_name} {conf*100:.1f}%"
+                    (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2)
+                    cv2.rectangle(frame, (x1, y1 - th - 10), (x1 + tw, y1), (0, 255, 0), -1)
+                    cv2.putText(frame, label, (x1, y1 - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
                     
-                    # Background for text
-                    cv2.rectangle(frame, (x1, y1 - label_h - 10), 
-                                (x1 + label_w, y1), color, -1)
-                    
-                    # Text
-                    cv2.putText(frame, label, (x1, y1 - 5),
-                              cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
-                    
-                    # Update statistics
                     detection_count += 1
-                    total_confidence += confidence
+                    total_confidence += conf
                     
-            except Exception as e:
-                pass  # Skip frame on error
-            
-            # Clean up temp frame
-            try:
-                if os.path.exists(temp_frame.name):
-                    os.unlink(temp_frame.name)
-            except Exception as e:
+            except Exception:
                 pass
             
-            # Write frame
+            # Clean up temp frame
+            if os.path.exists(temp_frame.name):
+                os.unlink(temp_frame.name)
+            
             out.write(frame)
         
-        # Cleanup
         cap.release()
         out.release()
         
-        # Calculate statistics
-        processing_time = time.time() - start_time
-        avg_confidence = (total_confidence / detection_count * 100) if detection_count > 0 else 0
-        
-        stats = {
+        return {
             'total_frames': frame_count,
             'detections': detection_count,
-            'avg_confidence': avg_confidence,
-            'processing_time': processing_time,
+            'avg_confidence': (total_confidence/detection_count*100) if detection_count > 0 else 0,
+            'processing_time': time.time() - start_time,
             'fps': fps
         }
-        
-        return stats
 
 # ---------------------------
 # Main App UI
@@ -316,151 +201,103 @@ class FaceDetectionProcessor:
 st.title("🎥 Face Recognition System")
 st.markdown(f"**Detecting:** Pavani | **Powered by:** Roboflow AI")
 
-# Initialize model
-with st.spinner("🔄 Initializing Roboflow model..."):
+# Init Model
+with st.spinner("🔄 Initializing Model..."):
     model, workspace, person_name = init_roboflow()
 
-if model is None:
+if not model:
     st.stop()
 
-st.success(f"✅ Model loaded successfully! Detecting: **{person_name}**")
-
-# Main Layout
-st.markdown("### 1. Upload & Configure")
+# Layout
 col1, col2 = st.columns([2, 1])
 
 with col1:
-    st.markdown("##### Upload Video")
+    st.markdown("##### 1. Upload Video")
+    # ADDED KEY HERE TO FIX RELOAD ISSUE
     uploaded_video = st.file_uploader(
         "Upload a video file",
         type=["mp4", "mov", "avi", "mkv"],
-        label_visibility="collapsed"
+        key="video_upload" 
     )
     
     if uploaded_video:
+        # Display file info to confirm receipt
+        st.info(f"✅ File Received: {uploaded_video.name} ({uploaded_video.size/1024:.0f} KB)")
         st.video(uploaded_video)
-        file_size = uploaded_video.size / (1024 * 1024)
-        st.caption(f"📊 File: {uploaded_video.name} | Size: {file_size:.2f} MB")
 
 with col2:
-    st.markdown("##### Detection Settings")
-    confidence_threshold = st.slider(
-        "Confidence Threshold",
-        min_value=0.2,
-        max_value=0.95,
-        value=0.4,
-        step=0.05,
-        help="Higher values = fewer but more confident detections"
-    ) 
+    st.markdown("##### 2. Settings")
+    confidence_threshold = st.slider("Confidence Threshold", 0.2, 0.95, 0.4, 0.05)
     
-    st.markdown("---")
-    st.markdown("##### Model Info")
-    st.info(f"""
-    **Person:** {person_name}  
-    **Confidence:** {int(confidence_threshold * 100)}%  
-    **Workspace:** {workspace}
-    """)
+    st.divider()
+    
+    # Process Button
+    start_btn = st.button("🚀 Start Face Detection", use_container_width=True)
 
-st.markdown("---")
-
-# Process Button
-if st.button("🚀 Start Face Detection", use_container_width=True):
-    if uploaded_video:
-        with st.spinner("Processing video... This may take a few minutes."):
-            # Create temp directory
+if start_btn and uploaded_video:
+    with st.spinner("Processing... Do not refresh page."):
+        try:
+            # 1. Setup Temp Paths
             tmp_dir = Path(tempfile.gettempdir()) / "face_recognition"
             tmp_dir.mkdir(exist_ok=True)
             
-            # Save input video
             in_path = tmp_dir / f"input_{int(time.time())}.mp4"
-            with open(in_path, "wb") as f:
-                f.write(uploaded_video.getbuffer())
-            
-            # Output path
             out_path = tmp_dir / f"output_{int(time.time())}.mp4"
             
-            # Progress tracking
-            progress_bar = st.progress(0.0)
-            status_text = st.empty()
+            # 2. Robust File Save
+            uploaded_video.seek(0) # Reset pointer to start
+            with open(in_path, "wb") as f:
+                f.write(uploaded_video.read())
+                
+            # 3. Process
+            processor = FaceDetectionProcessor(model, person_name, confidence_threshold)
             
-            def update_progress(fraction):
-                progress_bar.progress(min(1.0, fraction))
-                status_text.text(f"Processing: {fraction*100:.1f}%")
+            progress_bar = st.progress(0)
+            status = st.empty()
             
-            try:
-                # Process video
-                processor = FaceDetectionProcessor(
-                    model=model,
-                    person_name=person_name,
-                    confidence_threshold=confidence_threshold
-                )
+            def update_bar(p):
+                progress_bar.progress(p)
+                status.text(f"Processing: {int(p*100)}%")
                 
-                stats = processor.process_video(
-                    input_path=in_path,
-                    output_path=out_path,
-                    progress_callback=update_progress
-                )
-                
-                progress_bar.progress(1.0)
-                status_text.empty()
-                st.toast("✅ Processing complete!", icon="🎉")
-                
-                # Display Results
-                st.markdown("---")
-                st.markdown("### 2. Results")
-                
-                res_col1, res_col2 = st.columns([2, 1])
-                
-                with res_col1:
-                    st.markdown("##### Processed Video")
-                    if os.path.exists(out_path):
-                        with open(out_path, "rb") as f:
-                            video_bytes = f.read()
-                        
-                        # ----------------------------------------------------
-                        # This line displays the video directly in the website
-                        # ----------------------------------------------------
-                        st.video(video_bytes)
-                        
-                        st.download_button(
-                            "⬇️ Download Processed Video",
-                            video_bytes,
-                            file_name=f"{person_name}_detection_{int(time.time())}.mp4",
-                            mime="video/mp4",
-                            use_container_width=True
-                        )
-                    else:
-                        st.error("⚠️ Output file not found!")
-                
-                with res_col2:
-                    st.markdown("##### Statistics")
-                    st.metric("Total Frames", f"{stats['total_frames']}")
-                    st.metric("Face Detections", f"{stats['detections']}")
-                    st.metric("Avg Confidence", f"{stats['avg_confidence']:.1f}%")
-                    st.metric("Processing Time", f"{stats['processing_time']:.1f}s")
-                    st.metric("Video FPS", f"{stats['fps']}")
+            stats = processor.process_video(in_path, out_path, update_bar)
+            
+            progress_bar.progress(100)
+            status.text("✅ Complete!")
+            
+            # 4. Show Results
+            st.divider()
+            st.markdown("### Results")
+            
+            r_col1, r_col2 = st.columns([2, 1])
+            
+            with r_col1:
+                if os.path.exists(out_path):
+                    with open(out_path, "rb") as f:
+                        video_bytes = f.read()
                     
-                    # Detection rate
-                    if stats['total_frames'] > 0:
-                        detection_rate = (stats['detections'] / stats['total_frames']) * 100
-                        st.metric("Detection Rate", f"{detection_rate:.1f}%")
-                
-                # Cleanup temp files
-                try:
-                    if os.path.exists(in_path):
-                        os.unlink(in_path)
-                except:
-                    pass
-                
-            except Exception as e:
-                st.error(f"❌ Processing failed: {str(e)}")
-                st.exception(e)
-    else:
-        st.warning("⚠️ Please upload a video first!")
+                    st.success("Video Processed Successfully!")
+                    st.video(video_bytes) # Try to play
+                    
+                    # Download button is critical if browser fails to play codec
+                    st.download_button(
+                        label="⬇️ Download Result (Recommended)",
+                        data=video_bytes,
+                        file_name="pavani_detected.mp4",
+                        mime="video/mp4",
+                        use_container_width=True
+                    )
+            
+            with r_col2:
+                st.metric("Total Detections", stats['detections'])
+                st.metric("Avg Confidence", f"{stats['avg_confidence']:.1f}%")
+                st.metric("FPS", stats['fps'])
 
-# Footer
-st.markdown("---")
-st.markdown(
-    "<p style='text-align: center; color: #666;'>Built with ❤️ using Streamlit & Roboflow</p>",
-    unsafe_allow_html=True
-)
+            # Cleanup
+            if os.path.exists(in_path):
+                os.unlink(in_path)
+
+        except Exception as e:
+            st.error(f"❌ Error during processing: {e}")
+
+elif start_btn and not uploaded_video:
+    st.warning("⚠️ Please upload a video first.")
