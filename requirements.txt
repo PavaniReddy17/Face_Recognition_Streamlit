@@ -1,6 +1,6 @@
-streamlit==1.29.0
+streamlit==1.41.0
 opencv-python-headless
-roboflow==1.1.9
-numpy==1.24.3
-Pillow==10.1.0
-requests==2.32.3
+roboflow
+numpy
+Pillow
+requests
